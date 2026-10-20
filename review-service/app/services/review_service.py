@@ -30,6 +30,15 @@ def get_reviews_for_product(product_id):
         "reviews": reviews,
     }
 
+# --- Tambahan Fungsi untuk Get Review by ID ---
+def get_review_by_id(review_id):
+    obj_id = _to_object_id(review_id)
+    review = review_model.find_by_id(obj_id)
+    if not review:
+        raise ReviewNotFoundError(review_id)
+    return review
+# ---------------------------------------------
+
 def create_review(payload):
     data = validate_create_review(payload)
     product_id = data["product_id"]

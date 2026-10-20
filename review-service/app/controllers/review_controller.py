@@ -18,6 +18,15 @@ def get_reviews(product_id):
     except ProductServiceUnavailableError as err:
         return jsonify({"error": str(err), "details": str(err.cause) if err.cause else None}), 503
 
+
+def get_review_by_id(review_id):
+    try:
+        data = review_service.get_review_by_id(review_id)
+        return jsonify(data), 200
+    except ReviewNotFoundError as err:
+        return jsonify({"error": str(err)}), 404
+
+
 def create_review():
     try:
         payload = request.get_json(silent=True) or {}
@@ -45,6 +54,6 @@ def update_review(review_id):
 def delete_review(review_id):
     try:
         review_service.delete_review(review_id)
-        return "", 204
+        return jsonify({"message": "Review berhasil dihapus"}), 200
     except ReviewNotFoundError as err:
         return jsonify({"error": str(err)}), 404
