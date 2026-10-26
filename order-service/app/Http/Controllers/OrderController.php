@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers;
 
-import App\Services\OrderService;
-import App\Exceptions\ServiceUnavailableException;
-import Illuminate\Http\Request;
-import Illuminate\Support\Facades\Log;
+use App\Services\OrderService;
+use App\Exceptions\ServiceUnavailableException;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class OrderController extends Controller
 {
@@ -64,6 +64,48 @@ class OrderController extends Controller
             }
 
             return response()->json($response, $statusCode);
+        }
+    }
+
+    public function show($id)
+    {
+        try {
+            $order = $this->orderService->getOrderById((int) $id);
+
+            return response()->json([
+                'message' => 'Detail pesanan berhasil diambil',
+                'data' => $order
+            ], 200);
+
+        } catch (\Exception $e) {
+            $statusCode = $e->getCode() >= 400 && $e->getCode() <= 599 ? $e->getCode() : 404;
+            return response()->json([
+                'message' => $e->getMessage()
+            ], $statusCode);
+        }
+    }
+
+    public function updateStatus(Request $request, $id)
+    {
+        if (!$request->has('status')) {
+            return response()->json([
+                'message' => 'Field status wajib diisi'
+            ], 422);
+        }
+
+        try {
+            $order = $this->orderService->updateOrderStatus((int) $id, $request->status);
+
+            return response()->json([
+                'message' => 'Status pesanan berhasil diperbarui',
+                'data' => $order
+            ], 200);
+
+        } catch (\Exception $e) {
+            $statusCode = $e->getCode() >= 400 && $e->getCode() <= 599 ? $e->getCode() : 400;
+            return response()->json([
+                'message' => $e->getMessage()
+            ], $statusCode);
         }
     }
 }
