@@ -2,12 +2,12 @@
 
 namespace App\Services;
 
-import App\Clients\CartClient;
-import App\Clients\ProductClient;
-import App\Models\Order;
-import App\Models\OrderItem;
-import Illuminate\Support\Facades\DB;
-import Illuminate\Support\Facades\Log;
+use App\Clients\CartClient;
+use App\Clients\ProductClient;
+use App\Models\Order;
+use App\Models\OrderItem;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Exception;
 
 class OrderService
@@ -52,7 +52,7 @@ class OrderService
 
             // Ubah harga dari teks (misal "450000.00") menjadi angka
             $unitPrice = (float) $product['price'];
-            $subtotal = $unitPrice * $quantity;
+            $subtotal = $unitPrice * $quantity; // <-- Diperbaiki (ditambah operator *)
             $totalAmount += $subtotal;
 
             $itemsToOrder[] = [
@@ -65,7 +65,6 @@ class OrderService
         }
 
         // 3. Simpan pesanan ke database menggunakan transaksi database (DB::transaction)
-        // Seluruhnya tersimpan atau tidak sama sekali
         $order = DB::transaction(function () use ($userId, $totalAmount, $itemsToOrder) {
             $newOrder = Order::create([
                 'user_id' => $userId,
@@ -83,11 +82,39 @@ class OrderService
         // 4. Kosongkan keranjang via cart-service
         $clearSuccess = $this->cartClient->clearCart($userId);
         if (!$clearSuccess) {
-            // Sesuai ketentuan: pesanan tetap tersimpan walau keranjang gagal dikosongkan, catat di log
             Log::warning("Pesanan {$order->id} berhasil dibuat, tetapi keranjang user {$userId} gagal dikosongkan.");
         }
 
         // Load relasi items untuk ditampilkan pada response
+        return $order->load('items');
+    }
+
+    public function getOrderById(int $orderId)
+    {
+        $order = Order::with('items')->find($orderId);
+
+        if (!$order) {
+            throw new Exception("Pesanan dengan ID {$orderId} tidak ditemukan", 404);
+        }
+
+        return $order;
+    }
+
+    public function updateOrderStatus(int $orderId, string $status)
+    {
+        $order = $this->getOrderById($orderId);
+
+        $validStatuses = ['PENDING', 'PAID', 'CANCELLED', 'COMPLETED'];
+        $upperStatus = strtoupper($status);
+
+        if (!in_array($upperStatus, $validStatuses)) {
+            throw new Exception("Status pesanan tidak valid", 422);
+        }
+
+        $order->update([
+            'status' => $upperStatus
+        ]);
+
         return $order->load('items');
     }
 }
