@@ -2,110 +2,158 @@
 
 namespace App\Http\Controllers;
 
-use App\Services\OrderService;
+use App\Exceptions\CartEmptyException;
+use App\Exceptions\InsufficientStockException;
+use App\Exceptions\InvalidOrderStatusException;
+use App\Exceptions\OrderNotFoundException;
+use App\Exceptions\ProductNotFoundException;
 use App\Exceptions\ServiceUnavailableException;
-use Illuminate\Http\Request;
+use App\Http\Requests\CreateOrderRequest;
+use App\Http\Requests\GetOrdersByUserRequest;
+use App\Services\OrderService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class OrderController extends Controller
 {
-    protected OrderService $orderService;
-
-    public function __construct(OrderService $orderService)
+    public function __construct(protected OrderService $orderService)
     {
-        $this->orderService = $orderService;
     }
 
-    public function store(Request $request)
+    public function store(CreateOrderRequest $request): JsonResponse
     {
-        // Validasi input sederhana untuk user_id
-        if (!$request->has('user_id') || !is_numeric($request->user_id)) {
-            return response()->json([
-                'message' => 'Data yang dikirim tidak valid',
-                'errors' => [
-                    'user_id' => ['Field user_id wajib diisi dan harus berupa angka']
-                ]
-            ], 422);
-        }
-
         try {
-            $order = $this->orderService->checkout((int) $request->user_id);
+            $order = $this->orderService->checkout((int) $request->validated()['user_id']);
 
             return response()->json([
                 'message' => 'Pesanan berhasil dibuat',
-                'data' => $order
+                'data' => $order,
             ], 201);
-
-        } catch (\Exception $e) {
-            $statusCode = $e->getCode();
-            // Pastikan kode status error valid (4xx atau 5xx), jika tidak default ke 500
-            if ($statusCode < 400 || $statusCode > 599) {
-                $statusCode = 500;
-            }
-
-            // Jika error dari service lain (503) atau error tak terduga
-            if ($e instanceof ServiceUnavailableException) {
-                $statusCode = 503;
-            }
-
-            Log::error("Gagal melakukan checkout: " . $e->getMessage());
-
-            $response = [
-                'message' => $e->getMessage() ?: 'Terjadi kesalahan pada server'
-            ];
-
-            // Tampilkan detail teknis jika mode debug aktif
-            if (config('app.debug')) {
-                $response['debug'] = [
-                    'exception' => get_class($e),
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine(),
-                ];
-            }
-
-            return response()->json($response, $statusCode);
+        } catch (CartEmptyException | ProductNotFoundException | InsufficientStockException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], 409);
+        } catch (ServiceUnavailableException $e) {
+            return $this->serviceUnavailableResponse($e);
+        } catch (Throwable $e) {
+            return $this->serverErrorResponse($e, 'membuat pesanan');
         }
     }
 
-    public function show($id)
+    public function show(mixed $id): JsonResponse
     {
+        if (!is_numeric($id)) {
+            return response()->json([
+                'message' => "Pesanan dengan id {$id} tidak ditemukan",
+            ], 404);
+        }
+
         try {
             $order = $this->orderService->getOrderById((int) $id);
 
             return response()->json([
-                'message' => 'Detail pesanan berhasil diambil',
-                'data' => $order
+                'message' => 'Berhasil mengambil pesanan',
+                'data' => $order,
             ], 200);
-
-        } catch (\Exception $e) {
-            $statusCode = $e->getCode() >= 400 && $e->getCode() <= 599 ? $e->getCode() : 404;
+        } catch (OrderNotFoundException $e) {
             return response()->json([
-                'message' => $e->getMessage()
-            ], $statusCode);
+                'message' => $e->getMessage(),
+            ], 404);
+        } catch (Throwable $e) {
+            return $this->serverErrorResponse($e, 'mengambil detail pesanan');
         }
     }
 
-    public function updateStatus(Request $request, $id)
+    public function getByUser(GetOrdersByUserRequest $request, mixed $userId): JsonResponse
     {
-        if (!$request->has('status')) {
+        if (!is_numeric($userId)) {
             return response()->json([
-                'message' => 'Field status wajib diisi'
-            ], 422);
+                'message' => 'Pesanan tidak ditemukan',
+            ], 404);
         }
 
         try {
-            $order = $this->orderService->updateOrderStatus((int) $id, $request->status);
+            $status = $request->validated()['status'] ?? null;
+            $orders = $this->orderService->getOrdersByUser((int) $userId, $status);
 
             return response()->json([
-                'message' => 'Status pesanan berhasil diperbarui',
-                'data' => $order
+                'message' => 'Berhasil mengambil daftar pesanan',
+                'data' => $orders,
             ], 200);
-
-        } catch (\Exception $e) {
-            $statusCode = $e->getCode() >= 400 && $e->getCode() <= 599 ? $e->getCode() : 400;
-            return response()->json([
-                'message' => $e->getMessage()
-            ], $statusCode);
+        } catch (Throwable $e) {
+            return $this->serverErrorResponse($e, 'mengambil daftar pesanan');
         }
+    }
+
+    public function pay(mixed $id): JsonResponse
+    {
+        if (!is_numeric($id)) {
+            return response()->json([
+                'message' => "Pesanan dengan id {$id} tidak ditemukan",
+            ], 404);
+        }
+
+        try {
+            $order = $this->orderService->payOrder((int) $id);
+
+            return response()->json([
+                'message' => 'Pesanan berhasil dibayar',
+                'data' => $order,
+            ], 200);
+        } catch (OrderNotFoundException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], 404);
+        } catch (InvalidOrderStatusException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], 409);
+        } catch (Throwable $e) {
+            return $this->serverErrorResponse($e, 'membayar pesanan');
+        }
+    }
+
+    private function serviceUnavailableResponse(ServiceUnavailableException $e): JsonResponse
+    {
+        Log::error("Layanan eksternal bermasalah: " . $e->getMessage());
+
+        $body = [
+            'message' => $e->getMessage(),
+        ];
+
+        if (config('app.debug')) {
+            $body['debug'] = [
+                'exception' => get_class($e),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ];
+        }
+
+        return response()->json($body, 503);
+    }
+
+    private function serverErrorResponse(Throwable $e, string $action): JsonResponse
+    {
+        Log::error("Terjadi error tak terduga saat {$action}: " . $e->getMessage(), [
+            'exception' => get_class($e),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+        ]);
+
+        $body = [
+            'message' => 'Terjadi kesalahan pada server',
+        ];
+
+        if (config('app.debug')) {
+            $body['debug'] = [
+                'exception' => get_class($e),
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ];
+        }
+
+        return response()->json($body, 500);
     }
 }

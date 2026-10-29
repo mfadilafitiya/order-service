@@ -5,11 +5,12 @@ use App\Http\Controllers\OrderController;
 
 Route::get('/health', function () {
     return response()->json([
-        'status' => 'OK',
-        'service' => 'Order Service'
-        ]);
+        'status' => 'ok',
+        'service' => 'order-service',
+    ]);
 });
 
 Route::post('/orders', [OrderController::class, 'store']);
 Route::get('/orders/{id}', [OrderController::class, 'show']);
-Route::patch('/orders/{id}/status', [OrderController::class, 'updateStatus']);
+Route::get('/orders/user/{userId}', [OrderController::class, 'getByUser']);
+Route::patch('/orders/{id}/pay', [OrderController::class, 'pay']);

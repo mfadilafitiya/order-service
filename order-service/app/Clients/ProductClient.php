@@ -3,8 +3,9 @@
 namespace App\Clients;
 
 use App\Exceptions\ServiceUnavailableException;
-use illuminate\support\Facades\Http;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class ProductClient
 {
@@ -12,10 +13,10 @@ class ProductClient
 
     public function __construct()
     {
-        $this->baseUrl = env('PRODUCT_SERVICE_URL', 'http://localhost:3001'); // Default URL if not set in .env
+        $this->baseUrl = config('services.product.url', env('PRODUCT_SERVICE_URL', 'http://product-services:3000'));
     }
 
-    public function getProduct($productId)
+    public function getProduct(int $productId): ?array
     {
         try {
             $response = Http::timeout(5)->get("{$this->baseUrl}/products/{$productId}");
@@ -23,17 +24,22 @@ class ProductClient
             if ($response->status() === 404) {
                 return null;
             }
-            if ($response->failed()) {
-            throw new ServiceUnavailableException("Product service tidak dapat dihubungi. coba lagi nanti.");
-            } 
 
-            return $response->json();
-        } catch (\Exception $e) {
-            if ($e instanceof ServiceUnavailableException) {
-                throw $e;
+            if ($response->successful()) {
+                $json = $response->json();
+                return $json['data'] ?? $json;
             }
-            Log::error("Gagal Menghubungi Product Service: " . $e->getMessage());
-            throw new ServiceUnavailableException("Product service tidak dapat dihubungi. coba lagi nanti.");
+
+            Log::error("Product service mengembalikan status {$response->status()}: " . $response->body());
+            throw new ServiceUnavailableException("Product service");
+        } catch (ServiceUnavailableException $e) {
+            throw $e;
+        } catch (Throwable $e) {
+            Log::error("Gagal menghubungi product-service: " . $e->getMessage(), [
+                'product_id' => $productId,
+                'url' => "{$this->baseUrl}/products/{$productId}",
+            ]);
+            throw new ServiceUnavailableException("Product service");
         }
     }
 }

@@ -5,6 +5,7 @@ namespace App\Clients;
 use App\Exceptions\ServiceUnavailableException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class CartClient
 {
@@ -12,41 +13,38 @@ class CartClient
 
     public function __construct()
     {
-        $this->baseUrl = env('CART_SERVICE_URL', 'http://localhost:3002');
+        $this->baseUrl = config('services.cart.url', env('CART_SERVICE_URL', 'http://cart-service:3002'));
     }
 
-    public function getCart($userId)
+    public function getCart(int $userId): array
     {
         try {
             $response = Http::timeout(5)->get("{$this->baseUrl}/carts/{$userId}");
 
-            if ($response->failed()) {
-                throw new ServiceUnavailableException("Cart service tidak dapat dihubungi, coba lagi nanti");
+            if ($response->successful()) {
+                return $response->json('data') ?? [];
             }
 
-            return $response->json('data');
-        } catch (\Exception $e) {
-            if ($e instanceof ServiceUnavailableException) {
-                throw $e;
-            }
-            Log::error("Gagal menghubungi cart-service: " . $e->getMessage());
-            throw new ServiceUnavailableException("Cart service tidak dapat dihubungi, coba lagi nanti");
+            Log::error("Cart service mengembalikan status {$response->status()}: " . $response->body());
+            throw new ServiceUnavailableException("Cart service");
+        } catch (ServiceUnavailableException $e) {
+            throw $e;
+        } catch (Throwable $e) {
+            Log::error("Gagal menghubungi cart-service: " . $e->getMessage(), [
+                'user_id' => $userId,
+                'url' => "{$this->baseUrl}/carts/{$userId}",
+            ]);
+            throw new ServiceUnavailableException("Cart service");
         }
     }
 
-    public function clearCart($userId)
+    public function clearCart(int $userId): bool
     {
         try {
             $response = Http::timeout(5)->delete("{$this->baseUrl}/carts/{$userId}");
-
-            if ($response->failed()) {
-                Log::warning("Gagal mengosongkan keranjang untuk user {$userId}");
-                return false;
-            }
-
-            return true;
-        } catch (\Exception $e) {
-            Log::error("Exception saat mengosongkan keranjang: " . $e->getMessage());
+            return $response->successful();
+        } catch (Throwable $e) {
+            Log::warning("Gagal memanggil endpoint clear cart untuk user {$userId}: " . $e->getMessage());
             return false;
         }
     }
